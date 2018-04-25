@@ -1,0 +1,368 @@
+            +--------------------+
+            |        CS 140      |
+            | PROJECT 1: THREADS |
+            |   DESIGN DOCUMENT  |
+            +--------------------+
+                   
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Pingtian Li <lipt@shanghaitech.edu.cn>
+Jiadi Cui <cuijd@shanghaitech.edu.cn>
+
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+We refer to the following blog while finishing this project:
+    https://www.cnblogs.com/laiy/p/pintos_project1_thread.html
+    
+                 ALARM CLOCK
+                 ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+Added to struct thread:
+    int64_t ticks_blocked; /*New varaibel to count how many ticks that are needed before the thread will be woken up*/
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+
+By calling timer_sleep(), we use a temporary varaible current_thread to store represent 
+the thread that calls the function and assign ticks to its sleep_ticks, and every tick we check 
+all threads' ticks_blocked to know whether there are any threads that finish their sleep process.
+If any, weak them up and put them into work again. 
+
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+Use a list to store all threads that are sleeping in ascending order, if the first element hasn't been
+woken up, then all others won't need to be checked. But because we find that check all threads are ok for all test points, so we didn't implement it.
+But we believe it will improve the performance.
+---- SYNCHRONIZATION ----
+
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+When one thread is calling timer_sleep(), we block it and use assert to disable interrupt so that there isn't any conflicts.
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()?
+Interrupt is disabled by ASSERT (intr_get_level () == INTR_ON);
+---- RATIONALE ----
+
+>> A6: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+It is most straight forward and don't need to add more struct. Need the least of thoughts.
+             PRIORITY SCHEDULING
+             ===================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+ANS:
++ thread.h
+    + struct thread
+        int base_priority;                  
+        /* Base priority. */
+        struct list locks;                  
+        /* Locks that the thread is holding. */
+        struct lock *wait;                  /
+        * The lock that the thread is waiting for. */
+
++ synch.h
+    + struct lock
+        struct list_elem elem;      
+        /* List element for priority donation. */
+        int max_priority;          
+        /* Max priority among the threads acquiring the lock. */
+
+>> B2: Explain the data structure used to track priority donation.
+>> Use ASCII art to diagram a nested donation.  (Alternately, submit a
+>> .png file.)
+ANS:
+When a high priority thread H waits on a lock held by a lower priority
+thread L, donate H’s priority to L and recall the donation once L 
+releases the lock. It means the semaphore waiting queue should be 
+designed as a priority queue, and when the lock is released, the
+preemption of priority will occur. We use priority donation for locks，
+instead of changing semaphores or conditional variables.
+
+The case of priority-donate-one:
+When a high-priority thread H is blocked because a low-priority thread
+L occupied the resources, the priority of the low-priority thread L
+should be raised to the priority of the highest-priority thread H 
+waiting for the resources it occupies. That is，the priority of the 
+thread with the higher priority is donated to the thread that holds 
+the priority of the resource, and it is executed first. 
+
++----------+ donate +----------+
+| Thread L | <----- | Thread H |
++----------+      / +----------+
+                 /
+                /
++----------+   /
+|   Lock   | <-
++----------+
+
+The case of priority-donate-multiple:
+We use `locks' in the struct thread and `max_priority' in the struct
+lock to deal with multiple-donate cases. When donating, a high-priority
+threads needs to apply for a lock in the low-priority threads. Thus, 
+the lock needs to maintains the `max_priority', a variable of recording
+the priority of current thread, when it comes to priority donation. 
+Threads accept several different priorities, so in order to release the
+lock and restore the correct values when un-donating, we need to 
+maintain the `max_priority' in the lock rather than in the thread.
+
++----------+   
+|  Lock 1  | <-
++----------+   \
+                \
+                 \
+                  \ +----------+
+                    | Thread B |
++----------+ <----- +----------+
+| Thread A | donate 
++----------+ <----- +----------+
+                    | Thread C |
+                  / +----------+
+                 /
+                /
++----------+   /
+|  Lock 2  | <-
++----------+
+
+The case of priority-donate-nest:
+By detecting whether the donated thread has obtained all the required 
+locks, it is determined whether there is a nested donation. If so, the 
+parameters are set to perform the next round of priority donations. 
+This is similar to the case of priority-donate-one, which means donating 
+more time, knowing that the donated thread has acquired all the required 
+locks.
+
++----------+ donate +----------+ donate +----------+
+| Thread L | <----- | Thread M | <----- | Thread H |
++----------+      / +----------+      / +----------+
+                 /                   /
+                /                   /
++----------+   /    +----------+   /
+|  Lock 1  | <-     |  Lock 2  | <-
++----------+        +----------+
+
+More specifically,
+
++-----------------------------------+
+| Thread H                          |
+|-----------------------------------|                   
+| priority = 36                     |
+| actual_priority = 36              |
+| lock_needed_by_thread: Lock 2     |
+| waiters: none                     |
++-----------------------------------+
+                 ||
+                 \/
+      +----------------------+
+      | Lock 2               |
+      |----------------------|
+      | owner = Thread M     |
+      +----------------------+
+                 ||
+                 \/
++-----------------------------------+
+| Thread M                          |
+|-----------------------------------|
+| priority = 36                     |
+| actual_priority = 34              |
+| lock_needed_by_thread: Lock 1     |
+| waiters: Thread H                 |
++-----------------------------------+
+                 ||
+                 \/
+      +----------------------+
+      | Lock 1               |
+      |----------------------|
+      | owner = Thread L     |
+      +----------------------+
+                 ||
+                 \/
++-----------------------------------+
+| Thread L                          |
+|-----------------------------------|
+| priority = 36                     |
+| actual_priority = 32              |
+| lock_needed_by_thread: none       |
+| waiters: Thread M                 |
++-----------------------------------+
+
+---- ALGORITHMS ----
+
+>> B3: How do you ensure that the highest priority thread waiting for
+>> a lock, semaphore, or condition variable wakes up first?
+
+There is a list which will store all of the thread and list will be 
+sorted by priority which means the thread with higher priority is 
+executed first.
+
+>> B4: Describe the sequence of events when a call to lock_acquire()
+>> causes a priority donation.  How is nested donation handled?
+
+Assume a low-priority thread L is holding onto a lock that the current 
+high-priority thread H is trying to acquire.
+When H tries to access lock, it goes through the entry stage of 
+lock_acquire() method call. It tries to decrease the semaphore and get 
+the lock, but as the semaphore has already been lowered by L and that 
+the lock is currently held by L, the current thread can not obtain the 
+lock. Therefore, based on a few primliminary checks and conditions, the 
+priority of the thread H is donated to the thread L. This enables L to 
+complete its execution and in turn allows for H to get the lock and 
+execute itself.
+
+Nested donation is handled by donating the priority of the threads over 
+to the lock waiters upto a nested donation level of 8. That is, we call 
+our thread_donate_priority() function, and this function loops as long
+as the nested donation level is lower than 8 and there is a lock on the 
+current thread. Then it checks to see if the lock has an owner in that 
+loop. If it has a owner and the priority of its owner is lower than the 
+priority of the current thread, it will set the priority of the lock 
+owner to the priority of current thread (the donation process) and 
+increase the donation level. Thus, the loop can continue.
+
+>> B5: Describe the sequence of events when lock_release() is called
+>> on a lock that a higher-priority thread is waiting for.
+
+Assume a high-priority thread H is waiting for the lock, which is held
+by the current thread L. When thread L releases its lock, we need to
+check whether L is the higher-priority task or not before the completion
+of the executiono of thread L. Compare with thread H, if thread L is a 
+lower-priority task, we will yield thread L and allow thread H to 
+execute. Then thread H gets the lock and executes, After that, thread L 
+continues to complete its execution.
+
+---- SYNCHRONIZATION ----
+
+>> B6: Describe a potential race in thread_set_priority() and explain
+>> how your implementation avoids it.  Can you use a lock to avoid
+>> this race?
+
+During priority donation, the priority of lock owner may be set by its 
+donor, and at the mean time, the thread itself may want to change the 
+priority. If the donor and the thread itself set the priority in a 
+different order, these two changes could potential collide and cause 
+incorrect changes to be made. 
+
+We avoid this by disabling interrupts at the beginning of the function 
+and re-enabling at the end of the function. And we can not use a lock
+to avoid this race.
+
+---- RATIONALE ----
+
+>> B7: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+It is easy to implment priority scheduling because we can trace the 
+thread which is currently holding the lock, the threads which are waiting
+for the lock, and the priority of these threads.
+
+I have considered another one which maintains locks in the threads, and
+it is not good because we can not easily trace the lock.
+
+              ADVANCED SCHEDULER
+              ==================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+Parameter Added in Thread.c:
+    int nice; /*The niceness of thread*/
+    int recent_cpu /*Amount of CPU time a thread has received*/
+    int load_avg; /*estimates the average number of threads ready to run over the past minute*/
+File added:
+    fixed_point.h /* it is added so that we can have more precise proprity estimation */
+---- ALGORITHMS ----
+
+>> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
+>> has a recent_cpu value of 0.  Fill in the table below showing the
+>> scheduling decision and the priority and recent_cpu values for each
+>> thread after each given number of timer ticks:
+
+timer  recent_cpu    priority   thread
+ticks   A   B   C   A   B   C   to run
+-----  --  --  --  --  --  --   ------
+ 0     0   1   2   63  61  59     A
+ 4     4   1   2   62  61  59     A
+ 8     7   2   4   61  61  58     B
+12     6   6   6   61  59  58     A
+16     9   6   7   60  59  57     A
+20     12  6   8   60  59  57     A 
+24     15  6   9   59  59  57     B
+28     14  10  10  59  58  57     A
+32     16  10  11  58  58  56     B
+36     15  14  12  59  57  56     A
+
+>> C3: Did any ambiguities in the scheduler specification make values
+>> in the table uncertain?  If so, what rule did you use to resolve
+>> them?  Does this match the behavior of your scheduler?
+Yes, recent_cpu is ambiguious. We cannot take the time that CPU takes on the calculation part.
+Because to calculate these values, the current thread need to yield the cpu resource, therefore 
+every 4 ticks, we should add less than 4 ticks' time to recent_cpu.
+>> C4: How is the way you divided the cost of scheduling between code
+>> inside and outside interrupt context likely to affect performance?
+Because calculating those parameters such as recent_cpu,niceness and priority also takes time
+time, which leads to its recent_cpu ending up higher but with less utility exerted and lower priority, which leads to 
+several thread takes less cpu_time than others.
+---- RATIONALE ----
+
+>> C5: Briefly critique your design, pointing out advantages and
+>> disadvantages in your design choices.  If you were to have extra
+>> time to work on this part of the project, how might you choose to
+>> refine or improve your design?
+Firstly on algorithm level I won't make any comments for it is provided.
+Secondly on my implementation, I think all data structures takes at least O(n) time, and to sort a list it takes O(nlogn) time, so 
+if I am gonna reimplement this project, I will try use other data structures that only takes O(1) time to achieve all operations.
+
+>> C6: The assignment explains arithmetic for fixed-point math in
+>> detail, but it leaves it open to you to implement it.  Why did you
+>> decide to implement it the way you did?  If you created an
+>> abstraction layer for fixed-point math, that is, an abstract data
+>> type and/or a set of functions or macros to manipulate fixed-point
+>> numbers, why did you do so?  If not, why not?
+
+We only implements operations that are used frequently and with plenty of bit operations, for there are plenty of parentheses which will influence the codes' style and ability to be read. And we implement them with #define macro, because it is a straight calculation formula without any branching. The reason we didn't choose to use function is that function takes additional invoking time of stack which may influence the codes' performence.
+               SURVEY QUESTIONS
+               ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
