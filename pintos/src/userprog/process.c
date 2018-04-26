@@ -71,16 +71,31 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
+  if (!success) 
+    thread_exit ();
+
+  /*Save parameters onto stack*/
   char *esp=(char*)if_.esp;
   char *arg[strlen(file_name)];
   int i,n = 0;
-  for (;token!=NULL;token = strtok_r(NULL,' ',&save_ptr)){
+  for (;token!=NULL;token = strtok_r(NULL," ",&save_ptr)){
     esp-=strlen(token)+1;
     strlcpy(esp,token,strlen(token)+2);
     arg[n++]=esp;
   }
-  if (!success) 
-    thread_exit ();
+  while (int(esp)%4){
+    esp--;
+  }
+  int *p = esp - 4;
+  *p-- = 0;
+  for (i = n-1;i >= 0;i--){
+    *p--=(int*)arg[i];
+  }
+  *p-- = p+1;
+  *p-- = n;
+  *p-- = 0;
+  esp = p + 1;
+  if_.esp = esp;
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
