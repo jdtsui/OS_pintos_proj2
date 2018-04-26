@@ -58,7 +58,8 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
-  char * save_ptr;
+  char * token=NULL;
+  char * save_ptr=NULL;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -66,8 +67,8 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
 
-  real_name = strtok_r(fn_copy," ",&save_ptr);
-  success = load (real_name, &if_.eip, &if_.esp);
+  token = strtok_r(file_name," ",&save_ptr);
+  success = load (token, &if_.eip, &if_.esp);
 
   /*Save parameters onto stack*/
   char *esp=(char*)if_.esp;
@@ -78,7 +79,7 @@ start_process (void *file_name_)
     strlcpy(esp,token,strlen(token)+2);
     arg[n++]=esp;
   }
-  while (int(esp)%4){
+  while (((int)esp)%4){
     esp--;
   }
   int *p = esp - 4;
