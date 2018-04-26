@@ -69,11 +69,6 @@ start_process (void *file_name_)
   real_name = strtok_r(fn_copy," ",&save_ptr);
   success = load (real_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
-
   /*Save parameters onto stack*/
   char *esp=(char*)if_.esp;
   char *arg[strlen(file_name)];
@@ -96,7 +91,10 @@ start_process (void *file_name_)
   *p-- = 0;
   esp = p + 1;
   if_.esp = esp;
-
+  /* If load failed, quit. */
+  palloc_free_page (file_name);
+  if (!success) 
+    thread_exit ();
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
