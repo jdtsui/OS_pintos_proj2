@@ -41,7 +41,7 @@ process_execute (const char *file_name)
   strlcpy (fn_copy, file_name, PGSIZE);
 
   /* Get the real name of the file*/
-  real_name = strtok_r(fn_copy," ",&save_ptr);
+  real_name = strtok_r(file_name," ",&save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (real_name, PRI_DEFAULT, start_process, fn_copy);
@@ -72,7 +72,7 @@ start_process (void *file_name_)
 
   /*Save parameters onto stack*/
   char *esp=(char*)if_.esp;
-  char *arg[strlen(file_name)];
+  char *arg[256];
   int i,n = 0;
   for (;token!=NULL;token = strtok_r(NULL," ",&save_ptr)){
     esp-=strlen(token)+1;
