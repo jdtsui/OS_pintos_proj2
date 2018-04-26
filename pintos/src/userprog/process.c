@@ -71,6 +71,14 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
+  char *esp=(char*)if_.esp;
+  char *arg[strlen(file_name)];
+  int i,n = 0;
+  for (;token!=NULL;token = strtok_r(NULL,' ',&save_ptr)){
+    esp-=strlen(token)+1;
+    strlcpy(esp,token,strlen(token)+2);
+    arg[n++]=esp;
+  }
   if (!success) 
     thread_exit ();
 
